@@ -1,0 +1,58 @@
+# 后端 Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+ENV/
+
+# 前端
+node_modules/
+/dist
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 编辑器目录
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 环境变量文件
+.env
+.env.local
+.env.*.local
+
+# 日志文件
+*.log 
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+database/
+*.sql
+data/
+
+# 数据库备份
+*.dump
+*.backup
+*.bak 
