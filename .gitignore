@@ -37,6 +37,7 @@ yarn-error.log*
 *.swo
 
 # 环境变量文件
+backend/app/.env
 .env
 .env.local
 .env.*.local
