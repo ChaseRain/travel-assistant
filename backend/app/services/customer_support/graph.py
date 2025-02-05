@@ -5,52 +5,60 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import (
-    AIMessage,
-    HumanMessage,
-    SystemMessage,
-    BaseMessage,
-    ToolMessage
-)
+from langchain_core.messages import ToolMessage
+from typing import Annotated
+from typing_extensions import TypedDict
+from langgraph.graph.message import AnyMessage, add_messages
 from langchain_core.runnables import RunnableLambda
 from datetime import datetime
 from app.core.config import settings
-from .tools.policy_tool import (
-    check_flight_status,
-    get_available_seats,
-    update_ticket_to_new_flight,
-    cancel_ticket,
-    search_hotels,
-    book_hotel,
-    update_hotel,
-    cancel_hotel,
-    search_car_rentals,
-    book_car_rental,
-    update_car_rental,
-    cancel_car_rental,
-    search_trip_recommendations,
-    book_excursion,
-    update_excursion,
-    cancel_excursion,
-    lookup_policy,
-    handle_tool_error
-)
 from langchain_anthropic import ChatAnthropic
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableConfig
 
+from .tools.hotels_tool import (
+    search_hotels,
+    book_hotel,
+    update_hotel,
+    cancel_hotel,
+)
+
+from .tools.excursions_tool import (
+    search_trip_recommendations,
+    book_excursion,
+    update_excursion,
+    cancel_excursion,
+)
+from .tools.policy_tool import (
+    lookup_policy
+)
+from .tools.flight_tool import (
+    fetch_user_flight_information,
+    search_flights,
+    update_ticket_to_new_flight,
+    cancel_ticket,
+)   
+
+from .tools.car_rental_tool import (
+    search_car_rentals,
+    book_car_rental,
+    update_car_rental,
+    cancel_car_rental,
+)
+
+
+
 # 定义状态- 消息构成了聊天历史记录，这是我们简单助手所需的所有状态
 class State(TypedDict):
-    messages: list[BaseMessage]
+    messages: Annotated[list[AnyMessage], add_messages]
 
 # 定义助手类-此函数接收图状态，将其格式化为提示，然后调用 LLM 以预测最佳响应
 class Assistant:
     def __init__(self, runnable: Runnable):
         self.runnable = runnable
 
-        
-def __call__(self, state: State, config: RunnableConfig):
+    def __call__(self, state: State, config: RunnableConfig):
         while True:
             configuration = config.get("configurable", {})
             passenger_id = configuration.get("passenger_id", None)
@@ -94,22 +102,31 @@ primary_assistant_prompt = ChatPromptTemplate.from_messages(
 
 # 定义工具列表
 tools = [
-    check_flight_status,
-    get_available_seats,
+    # 航班相关工具
+    fetch_user_flight_information,
+    search_flights,
     update_ticket_to_new_flight,
     cancel_ticket,
+    
+    # 酒店相关工具
     search_hotels,
     book_hotel,
     update_hotel,
     cancel_hotel,
+    
+    # 租车相关工具
     search_car_rentals,
     book_car_rental,
     update_car_rental,
     cancel_car_rental,
+    
+    # 旅游相关工具
     search_trip_recommendations,
     book_excursion,
     update_excursion,
     cancel_excursion,
+    
+    # 政策查询工具
     lookup_policy
 ]
 

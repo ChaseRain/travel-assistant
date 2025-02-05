@@ -1,77 +1,61 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from app.services.customer_support.graph import create_customer_support_graph
-from datetime import datetime
-import shutil
-import uuid
-from typing import List, Dict, Any, Optional
-from langchain.schema import HumanMessage
-from langchain.schema import BaseMessage
+from app.routers import customer_router
+import logging
 
-class ChatRequest(BaseModel):
-    message: str
-    thread_id: Optional[str] = None  # 修复类型提示
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-app = FastAPI()
+# 创建 FastAPI 应用实例
+app = FastAPI(
+    title="客服支持系统 API",
+    description="客服聊天和操作确认的 API 接口",
+    version="1.0.0"
+)
 
+# 配置 CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # 替换为你的前端域名
+    allow_origins=["*"],  # 在生产环境中应该设置具体的域名
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-@app.post("/api/chat")
-async def chat_endpoint(request: ChatRequest):
-    """处理聊天请求的主函数"""
-    try:
-        graph = create_customer_support_graph()
-        
-        # 生成或使用现有的thread_id
-        thread_id = request.thread_id or str(uuid.uuid4())
-        
-        # 添加更详细的用户信息
-        user_info = {
-            "id": thread_id,
-            "name": "访客用户",
-            "type": "customer",
-            "language": "zh-CN",
-            "passenger_id": "3442 587242"
-        }
-        
-        # 创建消息历史
-        message_history = [
-            HumanMessage(content=request.message)
-        ]
-        
-        # 调用图并提供上下文
-        events = graph.invoke(
-            {
-                "messages": message_history,
-                "user_info": user_info,
-                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            },
-            {
-                "configurable": {
-                    "thread_id": thread_id,
-                    "checkpoint_id": "default",
-                    "checkpoint_ns": "default"
-                }
-            }
-        )
-        
-        # 处理响应
-        if isinstance(events, dict) and "messages" in events:
-            ai_message = events["messages"]
-            # 直接返回 content 属性
-            return {"response": ai_message.content}
-            
-        return {"error": "无法获取有效响应"}
-            
-    except Exception as e:
-        return {"error": str(e)}
+# 注册路由
+app.include_router(
+    customer_router.router,
+    prefix="/api/v1",
+    tags=["customer-support"]
+)
+
+# 健康检查端点
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+# 注册路由时添加错误处理
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    # 根据异常类型返回不同的状态码和信息
+    if isinstance(exc, HTTPException):
+        logger.error(f"HTTP error occurred: {exc.detail}")
+        return {"detail": exc.detail, "status_code": exc.status_code}
+    
+    # 对于其他未知异常，返回 500 状态码
+    logger.error(f"Unexpected error occurred: {exc}", exc_info=True)
+    return {"detail": "Internal server error", "status_code": 500}
+
+# 添加请求日志中间件
+@app.middleware("http")
+async def log_requests(request, call_next):
+    import time
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    logger.info(f"Request path: {request.url.path} - Time taken: {process_time:.2f}s")
+    return response
 
 if __name__ == "__main__":
     import uvicorn

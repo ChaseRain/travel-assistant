@@ -1,18 +1,16 @@
 import re
 import requests
-
 import numpy as np
 import openai
 from langchain_core.tools import tool
-from app.core.config import settings
-
-db = settings.DATABASE_URL
 
 response = requests.get(
     "https://storage.googleapis.com/benchmarks-artifacts/travel-db/swiss_faq.md"
 )
 response.raise_for_status()
 faq_text = response.text
+
+docs = [{"page_content": txt} for txt in re.split(r"(?=\n##)", faq_text)]
 
 
 class VectorStoreRetriever:
@@ -51,4 +49,3 @@ def lookup_policy(query: str) -> str:
     Use this before making any flight changes performing other 'write' events."""
     docs = retriever.query(query, k=2)
     return "\n\n".join([doc["page_content"] for doc in docs])
-
