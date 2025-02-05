@@ -4,7 +4,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_anthropic import ChatAnthropic
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
@@ -16,23 +16,24 @@ from langchain_core.runnables import RunnableLambda
 from datetime import datetime
 from app.core.config import settings
 from .tools import (
-    fetch_user_flight_information,
-    search_flights,
-    lookup_policy,
+    check_flight_status,
+    get_available_seats,
     update_ticket_to_new_flight,
     cancel_ticket,
-    search_car_rentals,
-    book_car_rental,
-    update_car_rental,
-    cancel_car_rental,
     search_hotels,
     book_hotel,
     update_hotel,
     cancel_hotel,
+    search_car_rentals,
+    book_car_rental,
+    update_car_rental,
+    cancel_car_rental,
     search_trip_recommendations,
     book_excursion,
     update_excursion,
     cancel_excursion,
+    lookup_policy,
+    handle_tool_error
 )
 
 # 定义状态- 消息构成了聊天历史记录，这是我们简单助手所需的所有状态
@@ -66,7 +67,7 @@ llm = ChatAnthropic(
     api_key=settings.ANTHROPIC_API_KEY
 )
 
-# 定义提示词模板
+# 修改提示词模板
 primary_assistant_prompt = ChatPromptTemplate.from_messages([
     (
         "system",
@@ -74,52 +75,94 @@ primary_assistant_prompt = ChatPromptTemplate.from_messages([
         "Use the provided tools to search for flights, company policies, and other information to assist the user's queries. "
         "When searching, be persistent. Expand your query bounds if the first search returns no results. "
         "If a search comes up empty, expand your search before giving up."
-        "\n\nCurrent user:\n<User>\n{user_info}\n</User>"
+        "\n\nCurrent user info: {user_info}"
         "\nCurrent time: {time}."
     ),
-    ("placeholder", "{messages}")
-]).partial(time=datetime.now)
+    MessagesPlaceholder(variable_name="messages")
+])
 
 # 定义工具列表
 tools = [
-    fetch_user_flight_information,
-    search_flights,
-    lookup_policy,
-    update_ticket_to_new_flight, 
+    check_flight_status,
+    get_available_seats,
+    update_ticket_to_new_flight,
     cancel_ticket,
-    search_car_rentals,
-    book_car_rental,
-    update_car_rental,
-    cancel_car_rental,
     search_hotels,
     book_hotel,
     update_hotel,
     cancel_hotel,
+    search_car_rentals,
+    book_car_rental,
+    update_car_rental,
+    cancel_car_rental,
     search_trip_recommendations,
     book_excursion,
     update_excursion,
-    cancel_excursion
+    cancel_excursion,
+    lookup_policy
 ]
 
-def create_tool_node_with_fallback(tools):
-    """创建带有错误处理的工具节点"""
-    def handle_tool_error(state):
-        error = state.get("error")
-        tool_calls = state["messages"][-1].tool_calls
-        return {
-            "messages": [
-                ToolMessage(
-                    content=f"Error: {repr(error)}\n please fix your mistakes.",
-                    tool_call_id=tc["id"],
-                )
-                for tc in tool_calls
-            ]
-        }
+def handle_tool_error(state: dict) -> dict:
+    """处理工具执行错误的函数
     
+    Args:
+        state: 包含错误信息和工具调用的状态字典
+        
+    Returns:
+        包含错误消息的字典
+    """
+    error = state.get("error")
+    tool_calls = state["messages"][-1].tool_calls
+    return {
+        "messages": [
+            ToolMessage(
+                content=f"错误：{repr(error)}\n请修正你的错误。",
+                tool_call_id=tc["id"],
+            )
+            for tc in tool_calls
+        ]
+    }
+
+def create_tool_node_with_fallback(tools: list) -> ToolNode:
+    """创建带有错误处理的工具节点
+    
+    Args:
+        tools: 工具列表
+        
+    Returns:
+        配置了错误处理的 ToolNode 实例
+    """
     return ToolNode(tools).with_fallbacks(
         [RunnableLambda(handle_tool_error)],
         exception_key="error"
     )
+
+def _print_event(
+    event: dict, 
+    _printed: set, 
+    max_length: int = 1500
+) -> None:
+    """打印事件信息
+    
+    Args:
+        event: 事件字典
+        _printed: 已打印消息ID集合
+        max_length: 消息最大长度
+    """
+    current_state = event.get("dialog_state")
+    if current_state:
+        print("当前状态：", current_state[-1])
+    
+    message = event.get("messages")
+    if message:
+        if isinstance(message, list):
+            message = message[-1]
+        if message.id not in _printed:
+            msg_repr = message.pretty_repr(html=True)
+            if len(msg_repr) > max_length:
+                msg_repr = f"{msg_repr[:max_length]} ... (已截断)"
+            print(msg_repr)
+            _printed.add(message.id)
 
 # 创建客服支持图
 def create_customer_support_graph():

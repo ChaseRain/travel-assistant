@@ -9,8 +9,6 @@ import pytz
 import requests
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
-from langchain.retrievers import VectorStoreRetriever
-
 from app.core.config import settings
 
 # 常量定义

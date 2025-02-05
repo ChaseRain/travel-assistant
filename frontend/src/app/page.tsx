@@ -4,6 +4,7 @@ import { useState } from 'react';
 import ChatInput from '@/components/ChatInput';
 import ChatMessages from '@/components/ChatMessages';
 import { Message } from '@/types';
+import { sendMessage } from '@/services/chatService';
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -22,28 +23,25 @@ export default function Home() {
       
       setMessages(prev => [...prev, userMessage]);
 
-      // 调用后端API
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: content,
-        }),
-      });
-
-      const data = await response.json();
+      // 使用chatService发送消息
+      const data = await sendMessage(content);
 
       // 添加助手回复
       const assistantMessage: Message = {
         role: 'assistant',
-        content: data.response,
+        content: data.error || data.response, // 显示错误信息或正常响应
         id: (Date.now() + 1).toString()
       };
 
       setMessages(prev => [...prev, assistantMessage]);
     } catch (error) {
+      // 将错误消息添加到对话中
+      const errorMessage: Message = {
+        role: 'assistant',
+        content: `发生错误: ${error instanceof Error ? error.message : '未知错误'}`,
+        id: (Date.now() + 1).toString()
+      };
+      setMessages(prev => [...prev, errorMessage]);
       console.error('Error sending message:', error);
     } finally {
       setLoading(false);
