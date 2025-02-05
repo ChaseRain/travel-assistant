@@ -6,6 +6,8 @@ from datetime import datetime
 import shutil
 import uuid
 from typing import List, Dict, Any, Optional
+from langchain.schema import HumanMessage
+from langchain.schema import BaseMessage
 
 class ChatRequest(BaseModel):
     message: str
@@ -30,51 +32,43 @@ async def chat_endpoint(request: ChatRequest):
         # 生成或使用现有的thread_id
         thread_id = request.thread_id or str(uuid.uuid4())
         
-        # 添加默认用户信息
+        # 添加更详细的用户信息
         user_info = {
-            "id": "default_user",
+            "id": thread_id,
             "name": "访客用户",
             "type": "customer",
-            "language": "zh-CN"
+            "language": "zh-CN",
+            "passenger_id": "3442 587242"
         }
         
-        # 创建一个包含完整上下文的消息历史
+        # 创建消息历史
         message_history = [
-            {
-                "role": "user",
-                "content": request.message
-            }
+            HumanMessage(content=request.message)
         ]
         
-        # 调用图时提供所有必需的变量
+        # 调用图并提供上下文
         events = graph.invoke(
             {
                 "messages": message_history,
                 "user_info": user_info,
-                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # 添加时间信息
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             },
             {
                 "configurable": {
                     "thread_id": thread_id,
-                    "passenger_id": "3442 587242",
                     "checkpoint_id": "default",
                     "checkpoint_ns": "default"
                 }
             }
         )
         
-        if "messages" in events:
-            messages = events["messages"]
-            # 如果messages是列表，获取最后一条消息的内容
-            if isinstance(messages, list) and messages:
-                last_message = messages[-1]
-                return {
-                    "response": last_message.get("content", str(last_message))
-                }
-            # 如果是单个消息对象
-            return {
-                "response": messages.get("content", str(messages))
-            }
+        # 处理响应
+        if isinstance(events, dict) and "messages" in events:
+            ai_message = events["messages"]
+            # 直接返回 content 属性
+            return {"response": ai_message.content}
+            
+        return {"error": "无法获取有效响应"}
             
     except Exception as e:
         return {"error": str(e)}

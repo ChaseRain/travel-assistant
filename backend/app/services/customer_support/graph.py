@@ -15,7 +15,7 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableLambda
 from datetime import datetime
 from app.core.config import settings
-from .tools import (
+from .tools.policy_tool import (
     check_flight_status,
     get_available_seats,
     update_ticket_to_new_flight,
@@ -35,6 +35,10 @@ from .tools import (
     lookup_policy,
     handle_tool_error
 )
+from langchain_anthropic import ChatAnthropic
+from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import Runnable, RunnableConfig
 
 # 定义状态- 消息构成了聊天历史记录，这是我们简单助手所需的所有状态
 class State(TypedDict):
@@ -42,20 +46,24 @@ class State(TypedDict):
 
 # 定义助手类-此函数接收图状态，将其格式化为提示，然后调用 LLM 以预测最佳响应
 class Assistant:
-    def __init__(self, runnable):
+    def __init__(self, runnable: Runnable):
         self.runnable = runnable
+
         
-    def __call__(self, state, config):
+def __call__(self, state: State, config: RunnableConfig):
         while True:
+            configuration = config.get("configurable", {})
+            passenger_id = configuration.get("passenger_id", None)
+            state = {**state, "user_info": passenger_id}
             result = self.runnable.invoke(state)
-            # 如果结果没有工具调用，并且没有内容，或者内容是一个列表，并且列表的第一个元素没有文本
+            # If the LLM happens to return an empty response, we will re-prompt it
+            # for an actual response.
             if not result.tool_calls and (
-                not result.content 
+                not result.content
                 or isinstance(result.content, list)
                 and not result.content[0].get("text")
             ):
-                # 如果结果没有工具调用，并且没有内容，或者内容是一个列表，并且列表的第一个元素没有文本，则添加一个用户消息，提示助手提供一个真实的输出
-                messages = state["messages"] + [HumanMessage(content="Respond with a real output.")]
+                messages = state["messages"] + [("user", "Respond with a real output.")]
                 state = {**state, "messages": messages}
             else:
                 break
@@ -64,22 +72,25 @@ class Assistant:
 # 初始化 LLM
 llm = ChatAnthropic(
     model="claude-3-sonnet-20240229",
-    api_key=settings.ANTHROPIC_API_KEY
+    api_key=settings.ANTHROPIC_API_KEY,
+    base_url="https://api.gptsapi.net"
 )
 
 # 修改提示词模板
-primary_assistant_prompt = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        "You are a helpful customer support assistant for Swiss Airlines. "
-        "Use the provided tools to search for flights, company policies, and other information to assist the user's queries. "
-        "When searching, be persistent. Expand your query bounds if the first search returns no results. "
-        "If a search comes up empty, expand your search before giving up."
-        "\n\nCurrent user info: {user_info}"
-        "\nCurrent time: {time}."
-    ),
-    MessagesPlaceholder(variable_name="messages")
-])
+primary_assistant_prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "You are a helpful customer support assistant for Swiss Airlines. "
+            " Use the provided tools to search for flights, company policies, and other information to assist the user's queries. "
+            " When searching, be persistent. Expand your query bounds if the first search returns no results. "
+            " If a search comes up empty, expand your search before giving up."
+            "\n\nCurrent user:\n<User>\n{user_info}\n</User>"
+            "\nCurrent time: {time}.",
+        ),
+        ("placeholder", "{messages}"),
+    ]
+).partial(time=datetime.now())
 
 # 定义工具列表
 tools = [
@@ -167,25 +178,33 @@ def _print_event(
 # 创建客服支持图
 def create_customer_support_graph():
     """创建客服支持图"""
-    # 创建图实例
     builder = StateGraph(State)
-    
-    # 创建助手实例
-    assistant_runnable = primary_assistant_prompt | llm.bind_tools(tools)
+
+    # 这行代码创建了一个可运行的助手对象
+    # primary_assistant_prompt 是主要的助手提示模板
+    # llm.bind_tools(tools) 将LLM与工具绑定在一起
+    # | 操作符用于将提示和工具链接成一个管道
+    assistant_runnable = (
+        primary_assistant_prompt | llm.bind_tools(tools)
+    )
     
     # 添加节点
     builder.add_node("assistant", Assistant(assistant_runnable))
     builder.add_node("tools", create_tool_node_with_fallback(tools))
+
     
     # 添加边
+    # Define edges: these determine how the control flow moves
     builder.add_edge(START, "assistant")
     builder.add_conditional_edges(
         "assistant",
         tools_condition,
     )
     builder.add_edge("tools", "assistant")
-    
-    # 添加状态持久化
+
+    # The checkpointer lets the graph persist its state
+    # this is a complete memory for the entire graph.
     memory = MemorySaver()
-    
     return builder.compile(checkpointer=memory)
+    
+
