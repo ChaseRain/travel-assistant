@@ -30,33 +30,6 @@ app.include_router(
     tags=["customer-support"]
 )
 
-# 健康检查端点
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
-
-# 注册路由时添加错误处理
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    # 根据异常类型返回不同的状态码和信息
-    if isinstance(exc, HTTPException):
-        logger.error(f"HTTP error occurred: {exc.detail}")
-        return {"detail": exc.detail, "status_code": exc.status_code}
-    
-    # 对于其他未知异常，返回 500 状态码
-    logger.error(f"Unexpected error occurred: {exc}", exc_info=True)
-    return {"detail": "Internal server error", "status_code": 500}
-
-# 添加请求日志中间件
-@app.middleware("http")
-async def log_requests(request, call_next):
-    import time
-    start_time = time.time()
-    response = await call_next(request)
-    process_time = time.time() - start_time
-    logger.info(f"Request path: {request.url.path} - Time taken: {process_time:.2f}s")
-    return response
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

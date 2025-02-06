@@ -1,14 +1,62 @@
 import sqlite3
+import logging
 from datetime import date, datetime
 from typing import Optional
+import os
+from pathlib import Path
 
 import pytz
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from app.core.config import settings
 
+# 使用相对路径
+project_root = Path(__file__).parent.parent.parent.parent.parent  # 回到项目根目录
+db_path = (project_root / settings.DATABASE_URL.replace('sqlite:///', '')).resolve()
 db = settings.DATABASE_URL
 ERROR_NO_PASSENGER_ID = "No passenger ID configured."
+
+def get_db_connection():
+    """创建数据库连接并返回连接和游标"""
+    logger = logging.getLogger(__name__)
+    try:
+        # 确保数据库目录存在
+        db_dir = os.path.dirname(str(db_path))
+        if not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+            logger.info(f"创建数据库目录: {db_dir}")
+        
+        logger.info(f"尝试连接数据库: {db}")
+        logger.info(f"实际数据库路径: {db_path}")
+        conn = sqlite3.connect(str(db_path))
+        
+        # 测试数据库连接并检查表
+        cursor = conn.cursor()
+        
+        # 查询所有表名
+        cursor.execute("""
+            SELECT name 
+            FROM sqlite_master 
+            WHERE type='table';
+        """)
+        tables = cursor.fetchall()
+        logger.info("数据库中的所有表：")
+        for table in tables:
+            logger.info(f"- {table[0]}")
+            
+            # 可选：查看表结构
+            cursor.execute(f"PRAGMA table_info({table[0]})")
+            columns = cursor.fetchall()
+            logger.info(f"{table[0]} 表的结构:")
+            for col in columns:
+                logger.info(f"  - {col[1]} ({col[2]})")
+        
+        return conn
+    except sqlite3.Error as e:
+        logger.error(f"数据库连接错误: {str(e)}")
+        logger.error(f"数据库路径: {db_path}")
+        logger.error(f"当前工作目录: {os.getcwd()}")
+        raise
 
 @tool
 def fetch_user_flight_information(config: RunnableConfig) -> list[dict]:
@@ -18,36 +66,74 @@ def fetch_user_flight_information(config: RunnableConfig) -> list[dict]:
         A list of dictionaries where each dictionary contains the ticket details,
         associated flight details, and the seat assignments for each ticket belonging to the user.
     """
+    logger = logging.getLogger(__name__)
+    
     configuration = config.get("configurable", {})
     passenger_id = configuration.get("passenger_id", None)
     if not passenger_id:
+        logger.error("航空：未提供乘客ID")
         raise ValueError(ERROR_NO_PASSENGER_ID)
 
-    conn = sqlite3.connect(db)
-    cursor = conn.cursor()
-
-    query = """
-    SELECT 
-        t.ticket_no, t.book_ref,
-        f.flight_id, f.flight_no, f.departure_airport, f.arrival_airport, f.scheduled_departure, f.scheduled_arrival,
-        bp.seat_no, tf.fare_conditions
-    FROM 
-        tickets t
-        JOIN ticket_flights tf ON t.ticket_no = tf.ticket_no
-        JOIN flights f ON tf.flight_id = f.flight_id
-        JOIN boarding_passes bp ON bp.ticket_no = t.ticket_no AND bp.flight_id = f.flight_id
-    WHERE 
-        t.passenger_id = ?
-    """
-    cursor.execute(query, (passenger_id,))
-    rows = cursor.fetchall()
-    column_names = [column[0] for column in cursor.description]
-    results = [dict(zip(column_names, row)) for row in rows]
-
-    cursor.close()
-    conn.close()
-
-    return results
+    logger.info(f"航空：正在查询乘客 {passenger_id} 的航班信息")
+    
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # 查询所有表名
+            cursor.execute("""
+                SELECT name 
+                FROM sqlite_master 
+                WHERE type='table';
+            """)
+            tables = cursor.fetchall()
+            logger.info("数据库中的所有表：")
+            for table in tables:
+                logger.info(f"- {table[0]}")
+            
+            # 检查tickets表是否存在
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='tickets';
+            """)
+            if not cursor.fetchone():
+                logger.error("tickets表不存在！")
+                return []
+            
+            # 检查该乘客是否存在
+            cursor.execute("SELECT * FROM tickets WHERE passenger_id = ?", (passenger_id,))
+            if not cursor.fetchone():
+                logger.error(f"未找到乘客ID为 {passenger_id} 的记录")
+                return []
+                
+            # 原有的查询
+            query = """
+            SELECT 
+                t.ticket_no, t.book_ref,
+                f.flight_id, f.flight_no, f.departure_airport, f.arrival_airport, 
+                f.scheduled_departure, f.scheduled_arrival,
+                bp.seat_no, tf.fare_conditions
+            FROM 
+                tickets t
+                JOIN ticket_flights tf ON t.ticket_no = tf.ticket_no
+                JOIN flights f ON tf.flight_id = f.flight_id
+                LEFT JOIN boarding_passes bp ON bp.ticket_no = t.ticket_no AND bp.flight_id = f.flight_id
+            WHERE 
+                t.passenger_id = ?
+            """
+            # logger.info(f"执行SQL查询: {query}")
+            cursor.execute(query, (passenger_id,))
+            
+            rows = cursor.fetchall()
+            logger.info(f"查询结果行数: {len(rows)}")
+            
+            column_names = [column[0] for column in cursor.description]
+            results = [dict(zip(column_names, row)) for row in rows]
+            return results
+            
+    except sqlite3.Error as e:
+        logger.error(f"数据库查询错误: {str(e)}")
+        raise
 
 
 @tool

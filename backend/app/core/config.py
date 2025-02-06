@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str
     OPENAI_API_KEY: str 
     TAVILY_API_KEY: str
-    DATABASE_URL: str = "sqlite:///./travel2.sqlite"
+    DATABASE_URL: str = "sqlite:///database/travel2.sqlite"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

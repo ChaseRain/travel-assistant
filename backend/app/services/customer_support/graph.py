@@ -78,8 +78,10 @@ class Assistant:
         return {"messages": result}
 
 # 初始化 LLM
+# model="claude-3-sonnet-20240229",
+# model="claude-3-5-sonnet-20240620",
 llm = ChatAnthropic(
-    model="claude-3-sonnet-20240229",
+    model="claude-3-5-sonnet-20241022",
     api_key=settings.ANTHROPIC_API_KEY,
     base_url="https://api.gptsapi.net"
 )
@@ -204,7 +206,7 @@ def create_customer_support_graph():
     assistant_runnable = (
         primary_assistant_prompt | llm.bind_tools(tools)
     )
-    
+    print("助手可运行对象:", assistant_runnable)
     # 添加节点
     builder.add_node("assistant", Assistant(assistant_runnable))
     builder.add_node("tools", create_tool_node_with_fallback(tools))
